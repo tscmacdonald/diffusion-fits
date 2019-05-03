@@ -56,14 +56,15 @@ def GlobalDiff(data):
     B = data.iloc[:,0]
     dataT = np.array(data.T[1:])
     fit_params = Parameters()
+    I0guesses = data.max()[1:]
     for iy, y in enumerate(dataT):
         fit_params.add('D_%i' % (iy+1), value = 1e-9, min = 1e-12, max = 1e-8)
-        fit_params.add('I0_%i' % (iy+1), value = 100, min = 1, max = 1e8)
+        fit_params.add('I0_%i' % (iy+1), value = I0guesses[iy], min = 1, max = 100*I0guesses[iy]) #Give each I0 parameter a unique guessed I0
     for iy in range(2,len(dataT)+1):
         fit_params['D_%i' % iy].expr='D_1'
     return minimize(objective,fit_params,args=(B,data))
 
-def MovingDiff(data,slicelength=10):
+def MovingDiff(data,slicelength=10,slicetime=2/3):
     '''Fitting for time-dependent diffusion + concentration data.
     Input: pandas dataframe formatted as
     B_0 I0_0 I1_0 ... In_0
@@ -74,50 +75,66 @@ def MovingDiff(data,slicelength=10):
     '''
     import numpy as np
     import pandas as pd
+    from tqdm import tqdm_notebook as tqdm
     from lmfit import minimize, Parameters, report_fit
 
     npoints = data.shape[0]-slicelength
-    Dpoints = np.zeros((npoints))
-    I0points = np.zeros((npoints,data.shape[1]-1))
-    I0range = range(I0points.shape[1])
-    for i in range(npoints):
+    ipoints = np.arange(0,npoints)
+    tpoints = ipoints*slicetime+slicetime*slicelength/2
+    
+    cols = data.columns[1:]
+    D = pd.DataFrame(index = tpoints,columns = [cols[0]])
+    Derr = pd.DataFrame(index = tpoints,columns = [cols[0]])
+    I0 = pd.DataFrame(index = tpoints,columns = cols)
+    I0err = pd.DataFrame(index = tpoints,columns = cols)
+
+    for i in tqdm(range(npoints),desc='Progress:',position=1,leave=False):      
         params = GlobalDiff(data.iloc[i:i+slicelength])
-        Dpoints[i] = params.params['D_1'].value
-        for j in I0range:
-            I0points[i,j] = params.params['I0_%i' % (j+1)].value
-    return Dpoints,I0points
+        I0slice,I0errslice = [],[]
+        for Ival in range(0,len(cols)):
+            ParamName = 'I0_{}'.format(Ival+1)
+            #I0.insert(params.params[ParamName].value,index=i,col)
+            I0slice.append(params.params[ParamName].value)
+            I0errslice.append(params.params[ParamName].stderr)        
+        D.loc[tpoints[i],cols[0]] = params.params['D_1'].value
+        Derr.loc[tpoints[i],cols[0]] = params.params['D_1'].stderr
+        I0.loc[tpoints[i],cols] = I0slice       
+        I0err.loc[tpoints[i],cols] = I0errslice  
+    return D,I0,Derr,I0err
+
     
 def MovingDiff_csv(fname,slicelength=10):
     '''A simple wrapper of  MovingDiff() to act on .csv files'''
     import pandas as pd
     return MovingDiff(pd.read_csv(fname),slicelength)
 
-def SeparateMovingDiffusion(data,slicelength=10):
+def SeparateMovingDiffusion(data,slicelength=10,slicetime=2/3):
     '''Moving average diffusion processing for multiple separate chemical species. 
-    Acts on a pandas dataframe containing a list of B-values in the first column, and corresponding peak integrals in subsequent columns.
+    Acts on a pandas dataframe containing a list of B-values in teh first column, and corresponding peak integrals in subsequent columns.
     Returns a pair of pandas dataframes [D,I] containing the calculated diffusion coefficients 
     and concentrations for each peak present in the input array. '''
     import pandas as pd
-    D = pd.DataFrame()
-    D,I = MovingDiff(data.iloc[:,[0,1]],slicelength=slicelength)
-    D = pd.DataFrame(D)
-    D.columns = [data.columns[1]]
-    I = pd.DataFrame(I)
-    I.columns = [data.columns[1]]
-    for i in range(2,data.shape[1]):
-        td,ti = MovingDiff(data.iloc[:,[0,i]],slicelength=slicelength)
-        td = pd.DataFrame(td)
-        ti = pd.DataFrame(ti)
-        td.columns = [data.columns[i]]
-        ti.columns = [data.columns[i]]
-        D = pd.concat([D,td],axis=1)
-        I = pd.concat([I,ti],axis=1)
-    return D, I
-def SeparateMovingDiffusion_csv(fname,slicelength=10)
+    import numpy as np
+    from tqdm import tqdm_notebook as tqdm
+    npoints = data.shape[0]-slicelength
+    ipoints = np.arange(0,npoints)
+    tpoints = ipoints*slicetime+slicetime*slicelength/2
+    D = pd.DataFrame(index = tpoints,columns=data.columns[1:])
+    I = pd.DataFrame(index = tpoints,columns=data.columns[1:])
+    Derr = pd.DataFrame(index = tpoints,columns=data.columns[1:])
+    Ierr = pd.DataFrame(index = tpoints,columns=data.columns[1:])
+
+    for peak in tqdm(data.columns[1:],desc='Peak-by-peak progress',position=2):
+        td,ti,tderr,tierr = MovingDiff(pd.concat([data.iloc[:,0],data[peak]],axis=1),slicelength=slicelength,slicetime=slicetime)    
+        D[peak] = td
+        I[peak] = ti
+        Derr[peak] = tderr
+        Ierr[peak] = tierr
+    return D, I, Derr, Ierr
+def SeparateMovingDiffusion_csv(fname,slicelength=10,slicetime=2/3):
     '''A wrapper of SeparateMovingDiffusion to act on .csv files'''
     import pandas as pd
-    D,I = SeparateMovingDiffusion(pd.read_csv(fname),slicelength=slicelength)
-    return D,I
+    return SeparateMovingDiffusion(pd.read_csv(fname),slicelength=slicelength,slicetime=slicetime)
 
 def MeOHTemp(dDelta):
     '''Converts a methanol CH3-OH chemical shift separation (in ppm) to a temperature (in K). 
