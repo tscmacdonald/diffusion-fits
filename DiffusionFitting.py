@@ -5,15 +5,18 @@ GlobalDiff(data)
     Global nonlinear fitting of the S-T equation for an arbitrary number of gradients and chemical shift environments. 
     Returns an lmfit parameters object containing fitted I0 intensities for all peaks, as well as a single globally fitted D value. 
 MovingDiff(data,slicelength=10)
-    Moving average fit for diffusion, using GlobalDiff to obtain a D value for each time point. S
-    Takes as input a pandas dataframe with the first column containing B values, and subsequent columns containing integrals for the peaks of interest. Slicelength sets the number of experiments used for each D(time) point.
-    Returns (Dpoints, I0points): two numpy arrays.
-MovingDiff_csv(fname,slicelength=10)
+    Global moving average fit for diffusion, using GlobalDiff to obtain a D value for each time point. S
+    Takes as input a pandas dataframe with the first column containing B values, and subsequent columns containing integrals for the peaks of interest. 
+    Slicelength sets the number of experiments used for each D(time) point. Slicetime sets the time (in minutes) taken to acquire each gradient slice.
+    Returns (Dpoints, I0points,Derr,Ierr): four pandas dataframes, each with indices corresponding to time. I0points and Ierr contain a column for each fitted NMR peak, while Dpoint and Der contain a single column with globally fitted diffusion data.
+    For systems involving multiple chemical species, use SeparateMovingDiffusion to obtain individual (non-globally fitted) diffusion coefficients.
+    Dpoints, I0points, Derr, and Ierr contain diffusion points, extrapolated intensities, and respective errors for each from fitting.
+MovingDiff_csv(fname,slicelength=10,slicetime=2/3)
     A wrapper for MovingDiff to act on a similarly formatted .csv file.
-SeparateMovingDiffusion(data,slicelength=10)
-    Generates a pair of pandas dataframes [D,I] containing calculation time-dependent diffusion coefficients and unattenuated integrals.
-    Acts on a pandas dataframe.
-SeparateMovingDiffusion_csv(fname,slicelength=10)
+SeparateMovingDiffusion(data,slicelength=10,slicetime=2/3)
+    Returns (Dpoints, I0points,Derr,Ierr): four pandas dataframes, each with indexes corresponding to time and a column for each peak.
+    Dpoints, I0points, Derr, and Ierr contain diffusion points, extrapolated intensities, and respective errors for each from fitting.
+SeparateMovingDiffusion_csv(fname,slicelength=10,slicetime=2/3)
     Generates a pair of pandas dataframes [D,I] containing calculation time-dependent diffusion coefficients and unattenuated integrals.
     Acts on a .csv file with the first column containing B-values, and each subsequent column containing the corresponding integrals for a particular chemical shift.
 MeOHTemp(dDelta)
@@ -103,10 +106,10 @@ def MovingDiff(data,slicelength=10,slicetime=2/3):
     return D,I0,Derr,I0err
 
     
-def MovingDiff_csv(fname,slicelength=10):
+def MovingDiff_csv(fname,slicelength=10,slicetime=2/3):
     '''A simple wrapper of  MovingDiff() to act on .csv files'''
     import pandas as pd
-    return MovingDiff(pd.read_csv(fname),slicelength)
+    return MovingDiff(pd.read_csv(fname),slicelength,slicetime)
 
 def SeparateMovingDiffusion(data,slicelength=10,slicetime=2/3):
     '''Moving average diffusion processing for multiple separate chemical species. 
@@ -142,6 +145,6 @@ def MeOHTemp(dDelta):
     return 409-36.54*dDelta-21.85*dDelta**2
 def MeOHDiff(dDelta):
     '''Calculates the expected self-diffusion coefficient of methanol for a given OH-CH3 peak chemical shift separation.
-    (This work)'''
+    See MacDonald et al, ChemPhysChem 2019, 20, 926–930'''
     import numpy as np
     return 5.124e-7 * np.exp((-1601)/(MeOHTemp(dDelta)))
